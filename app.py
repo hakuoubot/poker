@@ -190,6 +190,7 @@ class App:
         self.var_iters = tk.StringVar(value="20000")
         self.var_use_range = tk.BooleanVar(value=True)
         self.var_villain_action = tk.StringVar(value="なし")
+        self.var_villain_preflop = tk.StringVar(value="オープンしてきた")
 
         def add(row, col, text, widget):
             tk.Label(box, text=text, bg=BG, font=self.f_base).grid(
@@ -215,7 +216,10 @@ class App:
         add(2, 1, "残りスタック",
             tk.Entry(box, textvariable=self.var_stack, width=8,
                      font=self.f_base))
-        add(3, 0, "相手の前の行動",
+        add(3, 0, "相手のプリフロップ",
+            ttk.Combobox(box, textvariable=self.var_villain_preflop, width=14,
+                         state="readonly", values=list(pf.PREFLOP_ACTIONS)))
+        add(3, 1, "相手の前の行動",
             ttk.Combobox(box, textvariable=self.var_villain_action, width=12,
                          state="readonly",
                          values=list(st.VILLAIN_ACTION_KEEP)))
@@ -233,7 +237,8 @@ class App:
 
         for var in (self.var_hero, self.var_villain, self.var_opponents,
                     self.var_pot, self.var_call, self.var_stack,
-                    self.var_iters, self.var_villain_action):
+                    self.var_iters, self.var_villain_action,
+                    self.var_villain_preflop):
             var.trace_add("write", lambda *_a: self._request_calc())
 
         act = tk.Frame(box, bg=BG)
@@ -740,7 +745,8 @@ class App:
             tournament=self.var_tournament.get(),
             points=icm.POINT_PRESETS.get(self.var_points.get()),
             villain_stack=villain_stack, other_stacks=others,
-            villain_action=self.var_villain_action.get())
+            villain_action=self.var_villain_action.get(),
+            villain_preflop=self.var_villain_preflop.get())
         return sit, ""
 
     def _request_calc(self):

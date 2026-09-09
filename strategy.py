@@ -68,7 +68,8 @@ class Situation:
                  opponents=1, pot=3.0, to_call=0.0, stack=100.0,
                  iters=20000, use_range=True, seed=None,
                  tournament=False, points=None, villain_stack=None,
-                 other_stacks=(), ante=0.0, villain_action="なし"):
+                 other_stacks=(), ante=0.0, villain_action="なし",
+                 villain_preflop="オープンしてきた"):
         self.hole = list(hole)
         self.board = list(board)
         self.hero_pos = hero_pos
@@ -90,6 +91,9 @@ class Situation:
         self.ante = float(ante)
         # 相手が前のストリートまでに見せた行動。レンジを絞るのに使う
         self.villain_action = villain_action
+        # 相手のプリフロップの行動。3ベットされていると相手のレンジは
+        # 20〜45% から 5% 前後まで狭まるので、ここを見ないと勝率が甘く出る
+        self.villain_preflop = villain_preflop
 
     def orbit_cost(self):
         """1周(全員に1回ずつ手番が回る間)に自分が払うブラインドとアンティ。
@@ -271,7 +275,9 @@ def villain_range(sit):
     if not sit.use_range:
         return None
     dead = sit.hole + sit.board
-    spec = pf.opponent_range(sit.villain_pos, aggressive=sit.to_call > 0)
+    spec = pf.opponent_range(sit.villain_pos, aggressive=sit.to_call > 0,
+                             hero_pos=sit.hero_pos,
+                             preflop_action=sit.villain_preflop)
     combos = pf.range_combos(spec, dead=dead)
     if not combos:
         return None
@@ -438,8 +444,10 @@ def _apply_icm(a, sit, options, eq):
     a.notes.append("降りても1周で %.1fBB(ブラインドとアンティ)は失う。"
                    "その分を織り込んで順位EVを出している" % cost)
     if len(villains) > 1:
-        a.notes.append("相手%d人ぶんのチップの動きを順位EVに入れている"
-                       "(誰が取るかは均等とみなす近似)" % len(villains))
+        a.notes.append("【精度が落ちる】相手が%d人。順位EVは全員ぶんのチップの"
+                       "動きを入れているが、誰が取るかは均等とみなす近似。"
+                       "ソルバーは2人用なので使えない。数字は目安として読むこと"
+                       % len(villains))
     a.notes.append("ICMの前提: 実力差とブラインドの上がる速さは見ていない")
 
 
@@ -532,8 +540,13 @@ def _add_notes(a, sit, base):
                 note += " + ブラフとして弱い方から %.0f%%" % (bluff_frac * 100)
             a.notes.append(note + " に絞ってある")
         else:
-            a.notes.append("相手のレンジは %s のオープンレンジ相当とみなしている"
-                           % sit.villain_pos)
+            a.notes.append("相手のレンジは %s が「%s」場合の想定(全体の%.0f%%)"
+                           % (sit.villain_pos, sit.villain_preflop,
+                              pf.range_percent(pf.opponent_range(
+                                  sit.villain_pos,
+                                  aggressive=sit.to_call > 0,
+                                  hero_pos=sit.hero_pos,
+                                  preflop_action=sit.villain_preflop))))
     else:
         a.notes.append("相手を完全ランダムとして計算(実戦より自分に甘く出る)")
 
@@ -564,7 +577,10 @@ def _add_notes(a, sit, base):
 
 def _chart_advice(sit):
     """プリフロップはレンジ表の推奨も併記する(こちらが実戦の基準)。"""
-    if sit.to_call > 0:
+    if sit.villain_preflop == "3ベットしてきた":
+        action, note = pf.vs_threebet_action(sit.hero_pos, sit.villain_pos,
+                                             sit.hole)
+    elif sit.to_call > 0:
         action, note = pf.vs_raise_action(sit.hero_pos, sit.villain_pos,
                                           sit.hole)
     else:
@@ -591,7 +607,9 @@ def solver_ranges(sit):
         hero_spec = three + ", " + call
     hero = pf.expand(hero_spec) | {pf.hand_class(sit.hole)}
     villain = pf.expand(pf.opponent_range(sit.villain_pos,
-                                          aggressive=sit.to_call > 0))
+                                          aggressive=sit.to_call > 0,
+                                          hero_pos=sit.hero_pos,
+                                          preflop_action=sit.villain_preflop))
 
     hero_is_ip = pf.is_in_position(sit.hero_pos, sit.villain_pos)
     hero_text = ",".join(sorted(hero))

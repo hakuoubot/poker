@@ -14,6 +14,7 @@ import sys
 
 import draws
 import icm
+import preflop as pf
 import strategy as st
 from cards import parse_cards, card_code, cards_code
 from equity import standard_error
@@ -64,6 +65,9 @@ def one_round():
     to_call = _ask_float("自分が払う額(0なら誰もベットしていない)", 4)
     stack = _ask_float("自分の残りスタック", 97)
 
+    preflop_action = _ask_choice("相手のプリフロップの行動",
+                                 list(pf.PREFLOP_ACTIONS), "オープンしてきた")
+
     action = "なし"
     if board:
         action = _ask_choice("相手の前のストリートの行動",
@@ -83,7 +87,8 @@ def one_round():
                        stack=stack, iters=20000,
                        tournament=tour, points=points,
                        villain_stack=villain_stack, other_stacks=others,
-                       villain_action=action)
+                       villain_action=action,
+                       villain_preflop=preflop_action)
 
     print("\n計算中...")
     a = st.analyze(sit)

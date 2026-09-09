@@ -86,6 +86,16 @@ VS_RAISE = {
 }
 
 
+# 3ベットされた側の対応。3ベットは相手のレンジが一気に強くなるので、
+# オープンに対する対応(VS_RAISE)とは別の表が要る。
+# 4ベットは価値のある手だけ + A5s/A4s をブラフに混ぜる形が標準。
+VS_THREEBET = ("QQ+, AKs, AKo, A5s-A4s",
+               "99-JJ, AQs, AJs, KQs, AQo")
+
+# 相手のプリフロップの行動。レンジがまったく違うので分ける。
+PREFLOP_ACTIONS = ("オープンしてきた", "3ベットしてきた", "コールしただけ")
+
+
 def raiser_group(pos):
     if pos in ("UTG", "HJ"):
         return "EP"
@@ -248,12 +258,25 @@ def vs_raise_action(hero_pos, raiser_pos, hole):
     return "フォールド", "%s のレイズに対しては降りるハンド" % raiser_pos
 
 
-def opponent_range(raiser_pos, aggressive=True):
-    """相手のレンジ推定。上げてきた相手はそのポジションのオープンレンジ相当とみなす。
+def opponent_range(raiser_pos, aggressive=True, hero_pos=None,
+                   preflop_action="オープンしてきた"):
+    """相手のレンジ推定。
 
-    aggressive=False は「ただ付いてきただけの相手」で、
-    オープンレンジより広い(降りない側の)ハンドを持っていると考える。
+    preflop_action で大きく変わる。ここを見ないと、**3ベットされた場面でも
+    相手をオープンレンジ(20〜45%)のまま扱ってしまい、自分の勝率が
+    実際よりずっと高く出る**。3ベットレンジは上位4〜6%しかない。
     """
+    if preflop_action == "3ベットしてきた" and hero_pos:
+        ip = is_in_position(raiser_pos, hero_pos)
+        three, _call = VS_RAISE.get((raiser_group(hero_pos), ip),
+                                    VS_RAISE[(raiser_group(hero_pos), False)])
+        return three
+    if preflop_action == "コールしただけ" and hero_pos:
+        ip = is_in_position(raiser_pos, hero_pos)
+        _three, call = VS_RAISE.get((raiser_group(hero_pos), ip),
+                                    VS_RAISE[(raiser_group(hero_pos), False)])
+        return call
+
     if raiser_pos == "BB":
         # BB はオープンレイズをしない立場なので、代わりに
         # 「レイズに対して降りずに続ける範囲」を持っているとみなす
@@ -263,3 +286,22 @@ def opponent_range(raiser_pos, aggressive=True):
     if aggressive:
         return rng
     return rng + ", " + RFI["BTN"]
+
+
+def vs_threebet_action(hero_pos, raiser_pos, hole):
+    """3ベットされた場面での推奨。('4ベット'/'コール'/'フォールド', 補足)。
+
+    3ベットは相手のレンジが一気に狭くなる(上位5%前後)ので、
+    オープンに対する対応とはまったく別の判断になる。
+    """
+    cls = hand_class(hole)
+    four, call = VS_THREEBET
+    villain = opponent_range(raiser_pos, hero_pos=hero_pos,
+                             preflop_action="3ベットしてきた")
+    if cls in expand(four):
+        return "4ベット", "3ベットに対する4ベットレンジ(%.0f%%)" % range_percent(four)
+    if cls in expand(call):
+        return "コール", "3ベットに対するコールレンジ(%.0f%%)" % range_percent(call)
+    return ("フォールド",
+            "3ベットされたら降りるハンド(相手は上位%.0f%%しかない)"
+            % range_percent(villain))
