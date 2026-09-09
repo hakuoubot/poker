@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+.vscode/
+.idea/
+*.log
+solver_engine/TexasSolver.zip
+solver_engine/TexasSolver-v0.2.0-Windows/
+solver_engine/work/
+solver_engine/cache/
