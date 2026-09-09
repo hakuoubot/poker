@@ -89,7 +89,13 @@ def one_round():
     a = st.analyze(sit)
 
     eq = a.equity
-    print("\n=== %s  %s / %s ==="
+    name, reason = a.verdict()
+    print("\n" + "=" * 46)
+    print("  → %s" % name)
+    if reason:
+        print("     %s" % reason)
+    print("=" * 46)
+    print("%s  %s / %s"
           % (a.street, cards_code(hole), cards_code(board) or "-"))
     print("勝率 %.1f%%  (勝ち %.1f%% / 引き分け %.1f%% / 負け %.1f%%, 誤差 ±%.1f%%)"
           % (eq.equity * 100, eq.win * 100, eq.tie * 100, eq.lose * 100,

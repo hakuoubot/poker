@@ -142,6 +142,41 @@ class Analysis:
     def best(self):
         return self.options[0] if self.options else None
 
+    def verdict(self):
+        """「結局どうするか」を一言で。画面の一番上に大きく出す用。
+
+        数字を並べても、実戦で欲しいのは結論なので、
+        推奨アクションと、その一番大きい理由だけを返す。
+        """
+        if not self.options:
+            return "-", ""
+        top = self.options[0]
+        name = top.name
+
+        # プリフロップはレンジ表の方が実戦の基準なので、そちらを優先する
+        if self.chart:
+            hand, note = self.chart
+            action = hand[hand.index("(") + 1:-1] if "(" in hand else name
+            if self.pushfold:
+                return self.pushfold.recommend, self.pushfold.as_lines()[1]
+            return action, note
+
+        if self.pot_odds is not None and self.equity is not None:
+            need = (self.icm_pot_odds if self.icm_pot_odds is not None
+                    else self.pot_odds)
+            label = "ICM込みの必要勝率" if self.icm_pot_odds is not None                 else "必要勝率"
+            diff = self.equity.equity - need
+            reason = ("勝率 %.1f%% / %s %.1f%%(%s%.1f ポイント)"
+                      % (self.equity.equity * 100, label, need * 100,
+                         "+" if diff >= 0 else "", diff * 100))
+            return name, reason
+
+        if self.equity is not None:
+            return name, "勝率 %.1f%%  %s" % (
+                self.equity.equity * 100,
+                self.draw.made if self.draw else "")
+        return name, ""
+
 
 # ---------------------------------------------------------
 # 相手のレンジ

@@ -77,6 +77,7 @@ class App:
         self.f_bold = pick_font(root, 10, bold=True)
         self.f_card = pick_font(root, 11, bold=True)
         self.f_big = pick_font(root, 15, bold=True)
+        self.f_verdict = pick_font(root, 22, bold=True)
         self.f_mono = tkfont.Font(family="Consolas", size=10)
 
         self.slots = [None] * TOTAL_SLOTS
@@ -436,6 +437,16 @@ class App:
     def _build_results(self, parent):
         top = tk.Frame(parent, bg=BG)
         top.pack(fill="x", pady=(10, 0))
+
+        # 「結局どうするか」を一番大きく出す。数字はその下
+        self.verdict_label = tk.Label(top, text="", bg=BG, font=self.f_verdict,
+                                      anchor="w", justify="left",
+                                      wraplength=440)
+        self.verdict_label.pack(anchor="w")
+        self.verdict_note = tk.Label(top, text="", bg=BG, font=self.f_base,
+                                     fg="#444", anchor="w", justify="left",
+                                     wraplength=440)
+        self.verdict_note.pack(anchor="w", pady=(0, 4))
 
         self.equity_label = tk.Label(top, text="勝率 --", bg=BG,
                                      font=self.f_big, anchor="w",
@@ -805,8 +816,26 @@ class App:
     # -----------------------------------------------------
     # 結果表示
     # -----------------------------------------------------
+    # 判定の色分け。降りる=赤、受ける=青、攻める=緑
+    VERDICT_COLORS = (
+        ("降り", "#a03030"), ("フォールド", "#a03030"),
+        ("上げない", "#a03030"),
+        ("コール", "#2f5f8f"), ("チェック", "#2f5f8f"),
+        ("オールイン", "#8f3f8f"),
+    )
+
+    def _verdict_color(self, name):
+        for key, color in self.VERDICT_COLORS:
+            if name.startswith(key):
+                return color
+        return "#2f6f2f"        # レイズ・ベット・3ベット
+
     def _show(self, sit, a):
         eq = a.equity
+        name, reason = a.verdict()
+        self.verdict_label.configure(text="→ %s" % name,
+                                     fg=self._verdict_color(name))
+        self.verdict_note.configure(text=reason)
         self.equity_label.configure(
             text="%s / 勝率 %.1f%%" % (a.street, eq.equity * 100))
         self._draw_bar(eq, a.pot_odds)
