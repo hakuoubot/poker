@@ -30,6 +30,15 @@ import preflop as pf
 import icm
 from equity import equity
 
+# Nash ソルバー。equity_matrix.json が無ければ使えないので、
+# 無い場合は下の固定表にそのまま落ちる。
+try:
+    import nash
+    _NASH_READY = nash.load() is not None
+except Exception:
+    nash = None
+    _NASH_READY = False
+
 # 後ろに残っている人数(6人卓)
 PLAYERS_BEHIND = {"UTG": 5, "HJ": 4, "CO": 3, "BTN": 2, "SB": 1, "BB": 0}
 # そのうちブラインド(SB/BB)が何人か
@@ -53,6 +62,74 @@ CALL_RANGES = [
 ]
 
 
+def _advise_nash(sit):
+    """Nash 解に基づく判断。
+
+    *** 押す側と受ける側で扱いを変えている(重要) ***
+
+    解いた均衡は「相手も均衡通りに打つ」前提の答え。
+    順位ポイントの傾斜が急(6位 -28pt)なので、均衡では
+    「受ける側はほぼ降りる(コール10%)」→「押す側は何でも押す(96%)」
+    という極端な形になる。算術は正しいが、**実戦の相手はここまで降りない**。
+    そのまま真似すると 72o でオールインすることになり、自殺行為になる。
+
+    そこで:
+      - 受ける側(自分がコールするか)   -> 解いた値をそのまま使う。
+        これは相手の押しに対する最善応答で、相手が広く押すほど正しくなる
+      - 押す側(自分がオールインするか) -> **解いた値と、実戦的な固定表の
+        広い方**を相手のコールレンジとして使う。相手が降りすぎない前提で
+        評価するので、答えが保守側に倒れる
+    """
+    r = PushFoldResult()
+    table = nash.table_from_situation(sit)
+    cls = pf.hand_class(sit.hole)
+    push_pt, fold_pt, all_fold = nash.push_value(
+        table, cls, sit.hero_pos, floor_range=calling_range(sit.stack))
+
+    r.push_points = push_pt - fold_pt
+    r.all_fold_prob = all_fold
+    r.call_prob = 1.0 - all_fold
+    r.behind = len(nash.ORDER) - nash.ORDER.index(sit.hero_pos) - 1
+    r.solved = True
+
+    result = nash.solve_cached(table)
+    behind = nash.ORDER[nash.ORDER.index(sit.hero_pos) + 1:]
+    if behind:
+        widest = max(behind,
+                     key=lambda j: nash.range_percent(result["call"][
+                         (sit.hero_pos, j)]))
+        r.call_spec = "解いたコールレンジ(%s %.0f%%)" % (
+            widest, nash.range_percent(result["call"][(sit.hero_pos, widest)]))
+        _classes, matrix = nash.load()
+        r.equity_vs_call = nash._equity_vs(
+            matrix, cls, result["call"][(sit.hero_pos, widest)])
+
+    if r.push_points > 0.3:
+        r.recommend = "オールイン"
+    elif r.push_points > 0:
+        r.recommend = "オールイン(僅差)"
+    else:
+        r.recommend = "降りる"
+
+    r.notes.append("相手のコールレンジは **解いた均衡**(nash.py)。"
+                   "手で書いた表ではない")
+
+    # 順位ポイントの傾斜が急なので、ICM で解くと「押す側がほぼ全部押し、
+    # 受ける側がほとんど降りる」という極端な解になることがある。
+    # 理屈は通っている(飛べば最下位が確定して -28pt)が、
+    # 実戦の相手はここまで降りないので、そのまま真似すると危ない。
+    shove_pct = nash.range_percent(result["shove"][sit.hero_pos])
+    if shove_pct > 85:
+        r.notes.append("【注意】解が極端(この席は %.0f%% 押す)。"
+                       "順位ポイントの傾斜が急なため。"
+                       "実戦の相手はここまで降りないので割り引いて見ること"
+                       % shove_pct)
+    if sit.stack > 20:
+        r.notes.append("スタックが20BBより深いので、"
+                       "本来はオールイン一択ではなく通常のレイズも考える場面")
+    return r
+
+
 def calling_range(push_bb):
     """この大きさのオールインに、相手がコールしてくる範囲。"""
     for limit, spec in CALL_RANGES:
@@ -71,6 +148,7 @@ class PushFoldResult:
         self.behind = 0
         self.call_spec = ""
         self.recommend = ""
+        self.solved = False     # Nash を解いて出した答えか
         self.notes = []
 
     def as_lines(self):
@@ -83,13 +161,25 @@ class PushFoldResult:
         if self.call_prob > 0:
             out.append("コールされたときの勝率 %.1f%%"
                        % (self.equity_vs_call * 100))
-        out.append("後ろに %d人 / ブラインドの想定コールレンジ %.0f%%"
-                   % (self.behind, pf.range_percent(self.call_spec)))
+        if self.solved:
+            out.append("後ろに %d人 / %s" % (self.behind, self.call_spec))
+        else:
+            out.append("後ろに %d人 / ブラインドの想定コールレンジ %.0f%%"
+                       % (self.behind, pf.range_percent(self.call_spec)))
         return out + self.notes
 
 
-def advise(sit, iters=8000):
-    """今の局面でオールインすべきか。プリフロップ・自分から仕掛ける場面用。"""
+def advise(sit, iters=8000, use_nash=True):
+    """今の局面でオールインすべきか。プリフロップ・自分から仕掛ける場面用。
+
+    Nash 解が使えるならそちらを使う(相手のコールレンジが解いた値になる)。
+    使えないときは下の固定表による近似に落ちる。
+    """
+    if use_nash and _NASH_READY and sit.tournament:
+        try:
+            return _advise_nash(sit)
+        except Exception:
+            pass        # 解けなければ従来の近似で続ける
     r = PushFoldResult()
     stacks = sit.table_stacks()
     pts = sit.points
